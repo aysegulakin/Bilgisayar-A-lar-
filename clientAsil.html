@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Sesli Sohbet</title>
+</head>
+<body>
+    <h2>WebRTC P2P Sesli Sohbet</h2>
+    <button onclick="startCall()">Arama Başlat</button>
+    <script>
+        const signalingServer = new WebSocket('ws://localhost:8080');
+        let localStream;
+        let peerConnection;
+       
+        signalingServer.onopen = () => console.log('WebSocket bağlantısı başarılı.');
+        signalingServer.onerror = (error) => console.error('WebSocket hatası:', error);
+
+        const servers = {
+            iceServers: [
+               /* { 
+                    urls: "stun:stun.relay.metered.ca:80",  // Google STUN Sunucusu
+                },*/ 
+                { urls: "stun:stun.l.google.com:19302" },
+
+                {
+        urls: "turn:global.relay.metered.ca:80",
+        username: "83c22f8d9bc19a6e6f3a0fdd",
+        credential: "7hNcgqOUv9YmqOCU",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:80?transport=tcp",
+        username: "83c22f8d9bc19a6e6f3a0fdd",
+        credential: "7hNcgqOUv9YmqOCU",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:443",
+        username: "83c22f8d9bc19a6e6f3a0fdd",
+        credential: "7hNcgqOUv9YmqOCU",
+      },
+      {
+        urls: "turns:global.relay.metered.ca:443?transport=tcp",
+        username: "83c22f8d9bc19a6e6f3a0fdd",
+        credential: "7hNcgqOUv9YmqOCU",
+      },
+            ]
+        };
+       
+        signalingServer.onmessage = (message) => {
+            const data = JSON.parse(message.data);
+            if (data.offer) {
+                handleOffer(data.offer);
+            } else if (data.answer) {
+                handleAnswer(data.answer);
+            } else if (data.iceCandidate) {
+                handleNewICECandidate(data.iceCandidate);
+            }
+        };
+
+        function startCall() {
+            peerConnection = new RTCPeerConnection(servers);
+
+
+            navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    .then((stream) => {
+        console.log('Mikrofon başarılı:', stream);
+
+        // Mikrofon akışını PeerConnection'a ekleyin
+        stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+
+        // Teklif oluştur ve sinyalleme sunucusuna gönder
+        peerConnection.createOffer()
+            .then(offer => peerConnection.setLocalDescription(offer))
+            .then(() => signalingServer.send(JSON.stringify({ offer: peerConnection.localDescription })));
+    })
+    .catch(error => {
+        console.error('Mikrofon hatası:', error);
+    });
+
+
+    peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+            signalingServer.send(JSON.stringify({ iceCandidate: event.candidate }));
+        }
+    };
+
+    peerConnection.ontrack = (event) => {
+        const remoteAudio = document.createElement('audio');
+        remoteAudio.srcObject = event.streams[0];
+        remoteAudio.play();
+        console.log('Diğer kullanıcıdan gelen ses akışı:', event.streams[0]);
+    };
+        }
+
+        function handleOffer(offer) {
+            peerConnection = new RTCPeerConnection(servers);
+
+            // ICE ve signaling durumu dinleyicilerini buraya ekliyoruz
+            peerConnection.addEventListener('iceconnectionstatechange', () => {
+                console.log('ICE State: ' + peerConnection.iceConnectionState);
+            });
+
+            peerConnection.addEventListener('signalingstatechange', () => {
+                console.log('Signaling State: ' + peerConnection.signalingState);
+            });
+            
+            peerConnection.addEventListener('icecandidate', handleICECandidate);
+            peerConnection.addEventListener('track', handleTrack);
+
+            navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+                .then((stream) => {
+                    localStream = stream;
+                    const localAudio = document.createElement('audio');
+                    localAudio.srcObject = stream;
+                    localAudio.play();
+
+                    peerConnection.addTrack(stream.getAudioTracks()[0], stream);
+                    return peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+                })
+                .then(() => {
+                    return peerConnection.createAnswer();
+                })
+                .then((answer) => {
+                    return peerConnection.setLocalDescription(answer);
+                })
+                .then(() => {
+                    signalingServer.send(JSON.stringify({ answer: peerConnection.localDescription }));
+                })
+                .catch(error => console.error('Media error:', error));
+        }
+
+        function handleAnswer(answer) {
+            peerConnection.setRemoteDescription(new RTCSessionDescription(answer))
+                .catch(error => console.error('Error setting remote description:', error));
+        }
+
+        function handleICECandidate(event) {
+            if (event.candidate) {
+                signalingServer.send(JSON.stringify({ iceCandidate: event.candidate }));
+            }
+        }
+
+        function handleNewICECandidate(iceCandidate) {
+            peerConnection.addIceCandidate(new RTCIceCandidate(iceCandidate))
+                .catch(error => console.error('Error adding ICE candidate:', error));
+        }
+
+        function handleTrack(event) {
+            const remoteAudio = document.createElement('audio');
+            remoteAudio.srcObject = event.streams[0];
+            remoteAudio.play();
+        }
+    </script>
+</body>
+</html>
